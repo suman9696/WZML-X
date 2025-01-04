@@ -127,37 +127,22 @@ async def get_audio_thumb(audio_file):
     return des_dir
 
 
-async def take_ss(video_file, duration=None, total=1, gen_ss=False):
-    des_dir = ospath.join('Thumbnails', f"{time()}")
+async def take_ss(video_file, duration):
+    des_dir = 'Thumbnails'
     await makedirs(des_dir, exist_ok=True)
+    des_dir = ospath.join(des_dir, f"{time()}.jpg")
     if duration is None:
         duration = (await get_media_info(video_file))[0]
     if duration == 0:
         duration = 3
-    duration = duration - (duration * 2 / 100)
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", "",
+    duration = duration // 2
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", str(duration),
            "-i", video_file, "-vf", "thumbnail", "-frames:v", "1", des_dir]
-    tstamps = {}
-    thumb_sem = Semaphore(3)
-    
-    async def extract_ss(eq_thumb):
-        async with thumb_sem:
-            cmd[5] = str((duration // total) * eq_thumb)
-            tstamps[f"wz_thumb_{eq_thumb}.jpg"] = strftime("%H:%M:%S", gmtime(float(cmd[5])))
-            cmd[-1] = ospath.join(des_dir, f"wz_thumb_{eq_thumb}.jpg")
-            task = await create_subprocess_exec(*cmd, stderr=PIPE)
-            return (task, await task.wait(), eq_thumb)
-    
-    tasks = [extract_ss(eq_thumb) for eq_thumb in range(1, total+1)]
-    status = await gather(*tasks)
-    
-    for task, rtype, eq_thumb in status:
-        if rtype != 0 or not await aiopath.exists(ospath.join(des_dir, f"wz_thumb_{eq_thumb}.jpg")):
-            err = (await task.stderr.read()).decode().strip()
-            LOGGER.error(f'Error while extracting thumbnail no. {eq_thumb} from video. Name: {video_file} stderr: {err}')
-            await aiormtree(des_dir)
-            return None
-    return (des_dir, tstamps) if gen_ss else ospath.join(des_dir, "wz_thumb_1.jpg")
+    _, err, code = await cmd_exec(cmd)
+    if code != 0 or not await aiopath.exists(des_dir):
+        LOGGER.error( f'Error while extracting thumbnail from video. Name: {video_file} stderr: {err}')
+        return None
+    return des_dir
 
 
 async def split_file(path, size, file_, dirpath, split_size, listener, start_time=0, i=1, inLoop=False, multi_streams=True):
